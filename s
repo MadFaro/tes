@@ -12,64 +12,71 @@ import onnxruntime as ort
 MODEL_DIR = r"C:\Users\tolog\Desktop\gig"
 WAV_FILE = r"C:\Users\tolog\Desktop\test.wav"
 
-ENCODER_FILE = os.path.join(MODEL_DIR, "v3_rnnt_encoder.int8.onnx")
-DECODER_FILE = os.path.join(MODEL_DIR, "v3_rnnt_decoder.int8.onnx")
-JOINT_FILE = os.path.join(MODEL_DIR, "v3_rnnt_joint.int8.onnx")
-VOCAB_FILE = os.path.join(MODEL_DIR, "v3_vocab.txt")
+ENCODER_FILE = os.path.join(
+    MODEL_DIR,
+    "v3_rnnt_encoder.int8.onnx"
+)
+
+DECODER_FILE = os.path.join(
+    MODEL_DIR,
+    "v3_rnnt_decoder.int8.onnx"
+)
+
+JOINT_FILE = os.path.join(
+    MODEL_DIR,
+    "v3_rnnt_joint.int8.onnx"
+)
+
+VOCAB_FILE = os.path.join(
+    MODEL_DIR,
+    "v3_vocab.txt"
+)
 
 SAMPLE_RATE = 16000
 
-# GigaAM encoder ожидает 64 признака
 N_MELS = 64
-
-# Обычно для ASR используется 25 ms окно / 10 ms шаг
 N_FFT = 400
 WIN_LENGTH = 400
 HOP_LENGTH = 160
 
-# RNNT blank.
-# Для типичной RNNT-модели blank находится в 0.
 BLANK_ID = 0
 
-# Защита от зацикливания RNNT.
 MAX_SYMBOLS_PER_STEP = 20
 
 
 # ============================================================
-# ЗАГРУЗКА VOCAB
+# VOCAB
 # ============================================================
 
 def load_vocab(path):
+
     vocab = []
 
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\r\n")
 
-            # В vocab могут быть пустые строки.
-            vocab.append(line)
+        for line in f:
+            vocab.append(line.rstrip("\r\n"))
 
     return vocab
 
 
 # ============================================================
-# ЗАГРУЗКА WAV
+# WAV
 # ============================================================
 
 def load_audio(path):
-    audio, sr = sf.read(path, dtype="float32")
 
-    print("WAV:")
+    audio, sr = sf.read(
+        path,
+        dtype="float32"
+    )
+
+    print("\nWAV:")
     print("  sample rate:", sr)
     print("  shape:", audio.shape)
 
-    # Пользователь сказал, что WAV уже mono.
-    if audio.ndim != 1:
-        raise ValueError(
-            "WAV должен быть mono. Получена форма: {}".format(audio.shape)
-        )
-
     if sr != SAMPLE_RATE:
+
         raise ValueError(
             "Ожидается WAV {} Hz, получено {} Hz".format(
                 SAMPLE_RATE,
@@ -77,7 +84,46 @@ def load_audio(path):
             )
         )
 
-    return audio
+    # --------------------------------------------------------
+    # Проверяем стерео
+    # --------------------------------------------------------
+
+    if audio.ndim != 2:
+
+        raise ValueError(
+            "Ожидается двухканальный WAV. "
+            "Получена форма: {}".format(
+                audio.shape
+            )
+        )
+
+    if audio.shape[1] != 2:
+
+        raise ValueError(
+            "Ожидается 2 канала. "
+            "Получено: {}".format(
+                audio.shape[1]
+            )
+        )
+
+    # --------------------------------------------------------
+    # Разделяем каналы
+    # --------------------------------------------------------
+
+    left_channel = audio[:, 0]
+    right_channel = audio[:, 1]
+
+    print("  channels: 2")
+    print("  left channel:  operator")
+    print("  right channel: client")
+
+    print(
+        "  duration: {:.2f} sec".format(
+            len(right_channel) / SAMPLE_RATE
+        )
+    )
+
+    return left_channel, right_channel
 
 
 # ============================================================
@@ -85,14 +131,7 @@ def load_audio(path):
 # ============================================================
 
 def extract_features(audio):
-    """
-    WAV -> [1, 64, T]
 
-    Encoder ожидает:
-        audio_signal = [batch, 64, seq_len]
-    """
-
-    # Mel spectrogram
     mel = librosa.feature.melspectrogram(
         y=audio,
         sr=SAMPLE_RATE,
@@ -107,23 +146,33 @@ def extract_features(audio):
         fmax=SAMPLE_RATE // 2,
     )
 
-    # Log Mel
-    mel = np.log(np.maximum(mel, 1e-10))
+    mel = np.log(
+        np.maximum(
+            mel,
+            1e-10
+        )
+    )
 
-    # float32
-    mel = mel.astype(np.float32)
+    mel = mel.astype(
+        np.float32
+    )
 
     # [64, T] -> [1, 64, T]
-    mel = np.expand_dims(mel, axis=0)
+
+    mel = np.expand_dims(
+        mel,
+        axis=0
+    )
 
     return mel
 
 
 # ============================================================
-# ONNX MODELS
+# ONNX
 # ============================================================
 
 def load_models():
+
     session_options = ort.SessionOptions()
 
     session_options.graph_optimization_level = (
@@ -133,19 +182,25 @@ def load_models():
     encoder = ort.InferenceSession(
         ENCODER_FILE,
         sess_options=session_options,
-        providers=["CPUExecutionProvider"],
+        providers=[
+            "CPUExecutionProvider"
+        ]
     )
 
     decoder = ort.InferenceSession(
         DECODER_FILE,
         sess_options=session_options,
-        providers=["CPUExecutionProvider"],
+        providers=[
+            "CPUExecutionProvider"
+        ]
     )
 
     joint = ort.InferenceSession(
         JOINT_FILE,
         sess_options=session_options,
-        providers=["CPUExecutionProvider"],
+        providers=[
+            "CPUExecutionProvider"
+        ]
     )
 
     return encoder, decoder, joint
@@ -155,17 +210,15 @@ def load_models():
 # ENCODER
 # ============================================================
 
-def run_encoder(encoder, features):
-    """
-    features:
-        [1, 64, T]
-
-    length:
-        количество feature frames
-    """
+def run_encoder(
+    encoder,
+    features
+):
 
     length = np.array(
-        [features.shape[2]],
+        [
+            features.shape[2]
+        ],
         dtype=np.int64
     )
 
@@ -181,8 +234,15 @@ def run_encoder(encoder, features):
     encoded_len = outputs[1]
 
     print("\nEncoder:")
-    print("  encoded shape:", encoded.shape)
-    print("  encoded_len:", encoded_len)
+    print(
+        "  encoded shape:",
+        encoded.shape
+    )
+
+    print(
+        "  encoded_len:",
+        encoded_len
+    )
 
     return encoded, encoded_len
 
@@ -191,10 +251,12 @@ def run_encoder(encoder, features):
 # DECODER
 # ============================================================
 
-def decoder_step(decoder, token, h, c):
-    """
-    Один шаг LSTM decoder.
-    """
+def decoder_step(
+    decoder,
+    token,
+    h,
+    c
+):
 
     x = np.array(
         [[token]],
@@ -214,32 +276,44 @@ def decoder_step(decoder, token, h, c):
     new_h = outputs[1]
     new_c = outputs[2]
 
-    return dec, new_h, new_c
+    return (
+        dec,
+        new_h,
+        new_c
+    )
 
 
 # ============================================================
 # JOINT
 # ============================================================
 
-def run_joint(joint, enc, dec):
-    """
-    enc:
-        [1, 768]
+def run_joint(
+    joint,
+    enc,
+    dec
+):
 
-    dec:
-        [1, 320]
+    enc = np.asarray(
+        enc,
+        dtype=np.float32
+    )
 
-    Joint ожидает:
+    dec = np.asarray(
+        dec,
+        dtype=np.float32
+    )
 
-        enc [1, 768, 1]
-        dec [1, 320, 1]
-    """
+    enc = enc.reshape(
+        1,
+        768,
+        1
+    )
 
-    enc = np.asarray(enc, dtype=np.float32)
-    dec = np.asarray(dec, dtype=np.float32)
-
-    enc = enc.reshape(1, 768, 1)
-    dec = dec.reshape(1, 320, 1)
+    dec = dec.reshape(
+        1,
+        320,
+        1
+    )
 
     output = joint.run(
         None,
@@ -249,14 +323,13 @@ def run_joint(joint, enc, dec):
         }
     )[0]
 
-    # [1, 1, 1, 34] -> [34]
     output = output.reshape(-1)
 
     return output
 
 
 # ============================================================
-# GREEDY RNNT DECODER
+# RNNT GREEDY DECODER
 # ============================================================
 
 def greedy_decode(
@@ -264,34 +337,17 @@ def greedy_decode(
     encoder_length,
     decoder,
     joint,
-    blank_id=0,
+    blank_id=0
 ):
-    """
-    Greedy RNNT decoding.
 
-    encoder_output:
-        [1, 768, T]
-
-    RNNT algorithm:
-
-        t = encoder timestep
-
-        если joint -> blank:
-            переходим к следующему timestep
-
-        если joint -> token:
-            добавляем token
-            обновляем decoder
-            остаёмся на том же timestep
-    """
-
-    # Убираем batch dimension
     encoded = encoder_output[0]
 
-    # [768, T]
-    T = int(encoder_length)
+    T = int(
+        encoder_length
+    )
 
-    # Initial decoder state
+    # Initial LSTM state
+
     h = np.zeros(
         (1, 1, 320),
         dtype=np.float32
@@ -302,8 +358,8 @@ def greedy_decode(
         dtype=np.float32
     )
 
-    # RNNT обычно стартует с blank.
-    # При этом decoder должен получить стартовый token.
+    # Первый decoder state
+
     dec, h, c = decoder_step(
         decoder,
         blank_id,
@@ -317,7 +373,6 @@ def greedy_decode(
 
     while t < T:
 
-        # encoder vector для текущего timestep
         enc = encoded[:, t]
 
         emitted = 0
@@ -330,27 +385,37 @@ def greedy_decode(
                 dec
             )
 
-            token = int(np.argmax(logits))
+            token = int(
+                np.argmax(logits)
+            )
 
-            # Blank -> следующий encoder timestep
+            # Blank
+
             if token == blank_id:
+
                 t += 1
+
                 break
 
-            # Защита от pathological loop
             emitted += 1
 
             if emitted > MAX_SYMBOLS_PER_STEP:
+
                 print(
-                    "WARNING: слишком много токенов "
-                    "на одном timestep, принудительно переходим дальше"
+                    "WARNING: слишком много "
+                    "токенов на timestep"
                 )
+
                 t += 1
+
                 break
 
-            tokens.append(token)
+            tokens.append(
+                token
+            )
 
-            # Decoder получает только что сгенерированный token
+            # Обновляем decoder
+
             dec, h, c = decoder_step(
                 decoder,
                 token,
@@ -365,7 +430,11 @@ def greedy_decode(
 # TOKENS -> TEXT
 # ============================================================
 
-def tokens_to_text(tokens, vocab):
+def tokens_to_text(
+    tokens,
+    vocab
+):
+
     result = []
 
     for token_id in tokens:
@@ -374,24 +443,26 @@ def tokens_to_text(tokens, vocab):
             continue
 
         if token_id >= len(vocab):
+
             print(
-                "WARNING: token {} отсутствует в vocab".format(
+                "WARNING: token {} "
+                "отсутствует в vocab".format(
                     token_id
                 )
             )
+
+            continue
+
+        if token_id == BLANK_ID:
             continue
 
         token = vocab[token_id]
 
-        # blank
-        if token_id == BLANK_ID:
-            continue
+        result.append(
+            token
+        )
 
-        result.append(token)
-
-    text = "".join(result)
-
-    return text
+    return "".join(result)
 
 
 # ============================================================
@@ -401,60 +472,74 @@ def tokens_to_text(tokens, vocab):
 def main():
 
     print("=" * 70)
-    print("GigaAM v3 RNNT ONNX")
+    print("GigaAM v3 RNNT")
     print("Python 3.8 / CPU")
     print("=" * 70)
 
     # --------------------------------------------------------
-    # Проверяем файлы
+    # Проверка файлов
     # --------------------------------------------------------
 
-    for path in [
+    files = [
         ENCODER_FILE,
         DECODER_FILE,
         JOINT_FILE,
         VOCAB_FILE,
         WAV_FILE,
-    ]:
+    ]
+
+    for path in files:
 
         if not os.path.exists(path):
+
             raise FileNotFoundError(
-                "Файл не найден: {}".format(path)
+                "Файл не найден: {}".format(
+                    path
+                )
             )
 
     # --------------------------------------------------------
     # Vocabulary
     # --------------------------------------------------------
 
-    vocab = load_vocab(VOCAB_FILE)
+    vocab = load_vocab(
+        VOCAB_FILE
+    )
 
     print("\nVocabulary:")
-    print("  tokens:", len(vocab))
-
-    for i, token in enumerate(vocab):
-        print("  {} = {!r}".format(i, token))
-
-    # --------------------------------------------------------
-    # Audio
-    # --------------------------------------------------------
-
-    audio = load_audio(WAV_FILE)
-
-    print("\nAudio:")
-    print("  samples:", len(audio))
     print(
-        "  duration: {:.2f} sec".format(
-            len(audio) / SAMPLE_RATE
-        )
+        "  tokens:",
+        len(vocab)
     )
+
+    # --------------------------------------------------------
+    # WAV
+    # --------------------------------------------------------
+
+    left_channel, right_channel = load_audio(
+        WAV_FILE
+    )
+
+    # --------------------------------------------------------
+    # Пока используем ТОЛЬКО ПРАВЫЙ канал
+    # --------------------------------------------------------
+
+    print("\nTranscription:")
+    print("  selected channel: RIGHT / client")
+
+    audio = right_channel
 
     # --------------------------------------------------------
     # Features
     # --------------------------------------------------------
 
-    print("\nExtracting features...")
+    print(
+        "\nExtracting features..."
+    )
 
-    features = extract_features(audio)
+    features = extract_features(
+        audio
+    )
 
     print(
         "  features shape:",
@@ -465,13 +550,23 @@ def main():
     # Models
     # --------------------------------------------------------
 
-    print("\nLoading ONNX models...")
+    print(
+        "\nLoading ONNX models..."
+    )
 
     encoder, decoder, joint = load_models()
 
-    print("  encoder loaded")
-    print("  decoder loaded")
-    print("  joint loaded")
+    print(
+        "  encoder loaded"
+    )
+
+    print(
+        "  decoder loaded"
+    )
+
+    print(
+        "  joint loaded"
+    )
 
     # --------------------------------------------------------
     # Encoder
@@ -483,21 +578,25 @@ def main():
     )
 
     # --------------------------------------------------------
-    # RNNT decoding
+    # RNNT
     # --------------------------------------------------------
 
-    print("\nRNNT decoding...")
+    print(
+        "\nRNNT decoding..."
+    )
 
     tokens = greedy_decode(
         encoded,
-        int(encoded_len[0]),
+        encoded_len[0],
         decoder,
         joint,
-        blank_id=BLANK_ID,
+        blank_id=BLANK_ID
     )
 
-    print("\nTokens:")
-    print(tokens)
+    print(
+        "\nToken count:",
+        len(tokens)
+    )
 
     # --------------------------------------------------------
     # Text
@@ -508,8 +607,9 @@ def main():
         vocab
     )
 
-    print("\n" + "=" * 70)
-    print("RESULT:")
+    print("\n")
+    print("=" * 70)
+    print("RIGHT CHANNEL / CLIENT:")
     print("=" * 70)
     print(text)
     print("=" * 70)
