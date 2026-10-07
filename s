@@ -1,815 +1,167 @@
-import os
-import numpy as np
-import soundfile as sf
-import librosa
-import onnxruntime as ort
-
-
-# ============================================================
-# PATHS
-# ============================================================
-
-MODEL_DIR = r"C:\Users\tolog\Desktop\gig"
-WAV_FILE = r"C:\Users\tolog\Desktop\test.wav"
-
-ENCODER_FILE = os.path.join(
-    MODEL_DIR,
-    "v3_rnnt_encoder.int8.onnx"
-)
-
-DECODER_FILE = os.path.join(
-    MODEL_DIR,
-    "v3_rnnt_decoder.int8.onnx"
-)
-
-JOINT_FILE = os.path.join(
-    MODEL_DIR,
-    "v3_rnnt_joint.int8.onnx"
-)
-
-VOCAB_FILE = os.path.join(
-    MODEL_DIR,
-    "v3_vocab.txt"
-)
-
-
-# ============================================================
-# GigaAM v3 RNNT CONFIG
-# Берем значения непосредственно из v3_rnnt.yaml
-# ============================================================
-
-SAMPLE_RATE = 16000
-
-N_MELS = 64
-
-WIN_LENGTH = 320
-HOP_LENGTH = 160
-N_FFT = 320
-
-FMIN = 0
-FMAX = SAMPLE_RATE // 2
-
-MEL_SCALE = "htk"
-
-CENTER = False
-
-# Из YAML:
-# mel_norm: null
-#
-# Поэтому НИКАКОЙ Slaney normalization
-# здесь не используем.
-
-# RNNT
-ENCODER_DIM = 768
-DECODER_DIM = 320
-
-NUM_CLASSES = 34
-
-# RNNT blank находится после vocabulary.
-#
-# Vocabulary имеет 33 символа:
-#
-# 0  пробел
-# 1  а
-# ...
-# 32 ю
-#
-# 33 я
-#
-# Но RNNT имеет num_classes=34.
-#
-# Следовательно дополнительный класс = blank.
-#
-# В экспортированной модели это нужно проверить.
-# Для стандартного RNNT blank обычно последний индекс.
-BLANK_ID = 33
-
-
-# Максимальное количество non-blank символов
-# на один encoder frame.
-MAX_SYMBOLS_PER_STEP = 20
-
-
-# ============================================================
-# VOCAB
-# ============================================================
-
-print("=" * 70)
-print("ЗАГРУЗКА VOCAB")
-print("=" * 70)
-
-with open(VOCAB_FILE, "r", encoding="utf-8") as f:
-    vocab = [line.rstrip("\r\n") for line in f]
-
-
-print("Количество строк в vocab:", len(vocab))
-
-for i, token in enumerate(vocab):
-    print(
-        f"{i:2d}: {repr(token)}"
-    )
-
-
-# ============================================================
-# ПРОВЕРКА VOCAB
-# ============================================================
-
-if len(vocab) != 33:
-    print()
-    print(
-        "ВНИМАНИЕ: ожидалось 33 токена vocabulary, "
-        f"получено {len(vocab)}"
-    )
-
-
-print()
-print("RNNT NUM_CLASSES:", NUM_CLASSES)
-print("BLANK_ID:", BLANK_ID)
-
-
-# ============================================================
-# ONNX
-# ============================================================
-
-print()
-print("=" * 70)
-print("ЗАГРУЗКА ONNX")
-print("=" * 70)
-
-providers = [
-    "CPUExecutionProvider"
-]
-
-encoder = ort.InferenceSession(
-    ENCODER_FILE,
-    providers=providers
-)
-
-decoder = ort.InferenceSession(
-    DECODER_FILE,
-    providers=providers
-)
-
-joint = ort.InferenceSession(
-    JOINT_FILE,
-    providers=providers
-)
-
-
-# ============================================================
-# MODEL INFO
-# ============================================================
-
-def print_model_info(name, session):
-
-    print()
-    print("-" * 70)
-    print(name)
-    print("-" * 70)
-
-    print("INPUTS:")
-
-    for item in session.get_inputs():
-
-        print(
-            " ",
-            item.name,
-            "|",
-            item.shape,
-            "|",
-            item.type
-        )
-
-    print("OUTPUTS:")
-
-    for item in session.get_outputs():
-
-        print(
-            " ",
-            item.name,
-            "|",
-            item.shape,
-            "|",
-            item.type
-        )
-
-
-print_model_info(
-    "ENCODER",
-    encoder
-)
-
-print_model_info(
-    "DECODER",
-    decoder
-)
-
-print_model_info(
-    "JOINT",
-    joint
-)
-
-
-# ============================================================
-# READ WAV
-# ============================================================
-
-print()
-print("=" * 70)
-print("ЗАГРУЗКА WAV")
-print("=" * 70)
-
-audio, sr = sf.read(
-    WAV_FILE,
-    dtype="float32",
-    always_2d=True
-)
-
-print("Sample rate:", sr)
-print("Shape:", audio.shape)
-print("Channels:", audio.shape[1])
-
-
-# ============================================================
-# RIGHT CHANNEL
-# ============================================================
-
-if audio.shape[1] < 2:
-
-    raise RuntimeError(
-        "WAV не стерео. "
-        "Нужен WAV с двумя каналами."
-    )
-
-
-right = audio[:, 1]
-
-print()
-print("Выбран ПРАВЫЙ канал")
-
-print(
-    "Duration:",
-    len(right) / sr,
-    "sec"
-)
-
-
-# ============================================================
-# RESAMPLE
-# ============================================================
-
-if sr != SAMPLE_RATE:
-
-    print()
-    print(
-        f"Ресемплинг {sr} -> {SAMPLE_RATE}"
-    )
-
-    right = librosa.resample(
-        right,
-        orig_sr=sr,
-        target_sr=SAMPLE_RATE,
-        res_type="kaiser_best"
-    )
-
-    sr = SAMPLE_RATE
-
-else:
-
-    print()
-    print("Ресемплинг не требуется.")
-
-
-right = right.astype(
-    np.float32
-)
-
-
-print(
-    "После resample:",
-    len(right),
-    "samples"
-)
-
-print(
-    "Duration:",
-    len(right) / SAMPLE_RATE,
-    "sec"
-)
-
-
-# ============================================================
-# FEATURE EXTRACTION
-#
-# ТОЧНО ПО YAML
-#
-# features: 64
-# win_length: 320
-# hop_length: 160
-# n_fft: 320
-# mel_scale: htk
-# mel_norm: null
-# center: false
-# ============================================================
-
-print()
-print("=" * 70)
-print("FEATURE EXTRACTION")
-print("=" * 70)
-
-print("sample_rate :", SAMPLE_RATE)
-print("n_fft       :", N_FFT)
-print("win_length  :", WIN_LENGTH)
-print("hop_length  :", HOP_LENGTH)
-print("n_mels      :", N_MELS)
-print("mel_scale   :", MEL_SCALE)
-print("mel_norm    :", None)
-print("center      :", CENTER)
-
-
-# librosa:
-#
-# htk=True
-# соответствует mel_scale="htk"
-#
-# norm=None
-# соответствует mel_norm=null
-#
-# center=False
-# соответствует YAML
-#
-
-mel = librosa.feature.melspectrogram(
-    y=right,
-    sr=SAMPLE_RATE,
-
-    n_fft=N_FFT,
-    hop_length=HOP_LENGTH,
-    win_length=WIN_LENGTH,
-
-    window="hann",
-
-    center=False,
-
-    power=2.0,
-
-    n_mels=N_MELS,
-
-    fmin=FMIN,
-    fmax=FMAX,
-
-    htk=True,
-    norm=None
-)
-
-
-print()
-print("Mel shape:", mel.shape)
-
-
-# ============================================================
-# LOG
-# ============================================================
-
-# GigaAM FeatureExtractor работает с логарифмическими
-# mel features.
-#
-# Используем натуральный логарифм.
-
-mel = np.log(
-    np.maximum(
-        mel,
-        1e-10
-    )
-)
-
-
-mel = mel.astype(
-    np.float32
-)
-
-
-# ============================================================
-# ENCODER INPUT
-# ============================================================
-
-# Требуется:
-#
-# [batch, 64, seq_len]
-#
-
-features = mel[
-    np.newaxis,
-    :,
-    :
-]
-
-
-print()
-print("Encoder input:")
-print("shape :", features.shape)
-print("dtype :", features.dtype)
-
-
-# ============================================================
-# LENGTH
-# ============================================================
-
-feature_length = np.array(
-    [features.shape[2]],
-    dtype=np.int64
-)
-
-
-print(
-    "length:",
-    feature_length
-)
-
-
-# ============================================================
-# ENCODER
-# ============================================================
-
-print()
-print("=" * 70)
-print("ENCODER")
-print("=" * 70)
-
-encoder_outputs = encoder.run(
-    None,
-    {
-        "audio_signal": features,
-        "length": feature_length
-    }
-)
-
-
-encoded = encoder_outputs[0]
-encoded_len = encoder_outputs[1]
-
-
-print(
-    "encoded shape:",
-    encoded.shape
-)
-
-print(
-    "encoded_len:",
-    encoded_len
-)
-
-
-# ============================================================
-# INITIAL RNNT STATE
-# ============================================================
-
-print()
-print("=" * 70)
-print("INITIAL DECODER STATE")
-print("=" * 70)
-
-
-h = np.zeros(
-    (
-        1,
-        1,
-        DECODER_DIM
-    ),
-    dtype=np.float32
-)
-
-c = np.zeros(
-    (
-        1,
-        1,
-        DECODER_DIM
-    ),
-    dtype=np.float32
-)
-
-
-# ============================================================
-# DECODER
-# ============================================================
-
-def decoder_run(
-    token,
-    h_state,
-    c_state
-):
-
-    x = np.array(
-        [[token]],
-        dtype=np.int64
-    )
-
-    outputs = decoder.run(
-        None,
-        {
-            "x": x,
-            "h.1": h_state,
-            "c.1": c_state
-        }
-    )
-
-    dec = outputs[0]
-    new_h = outputs[1]
-    new_c = outputs[2]
-
-    return (
-        dec,
-        new_h,
-        new_c
-    )
-
-
-# ============================================================
-# JOINT
-# ============================================================
-
-def joint_run(
-    enc_vector,
-    dec_vector
-):
-
-    enc_input = enc_vector.reshape(
-        1,
-        ENCODER_DIM,
-        1
-    ).astype(np.float32)
-
-    dec_input = dec_vector.reshape(
-        1,
-        DECODER_DIM,
-        1
-    ).astype(np.float32)
-
-    output = joint.run(
-        None,
-        {
-            "enc": enc_input,
-            "dec": dec_input
-        }
-    )
-
-    return output[0]
-
-
-# ============================================================
-# RNNT
-# ============================================================
-
-print()
-print("=" * 70)
-print("RNNT GREEDY DECODING")
-print("=" * 70)
-
-
-encoded = encoded.astype(
-    np.float32
-)
-
-
-num_frames = int(
-    np.asarray(
-        encoded_len
-    ).reshape(-1)[0]
-)
-
-
-print(
-    "Encoder frames:",
-    num_frames
-)
-
-
-# ============================================================
-# RNNT START
-# ============================================================
-
-# Для RNNT нужен initial prediction network output.
-#
-# В decoder подаем blank.
-#
-# Важно:
-# состояние после blank НЕ нужно использовать как обычный
-# emitted token state.
-#
-# Поэтому отдельно получаем initial decoder output.
-
-decoder_output, _, _ = decoder_run(
-    BLANK_ID,
-    h,
-    c
-)
-
-
-tokens = []
-
-
-# ============================================================
-# DEBUG COUNTERS
-# ============================================================
-
-blank_count = 0
-nonblank_count = 0
-
-
-# ============================================================
-# GREEDY LOOP
-# ============================================================
-
-for t in range(num_frames):
-
-    enc_vector = encoded[
-        0,
-        :,
-        t
-    ]
-
-
-    symbols_this_frame = 0
-
-
-    while True:
-
-        logits = joint_run(
-            enc_vector,
-            decoder_output
-        )
-
-
-        logits = np.asarray(
-            logits
-        ).reshape(-1)
-
-
-        token_id = int(
-            np.argmax(logits)
-        )
-
-
-        # ----------------------------------------------------
-        # DEBUG
-        # ----------------------------------------------------
-
-        if t < 20:
-
-            token_text = (
-                vocab[token_id]
-                if token_id < len(vocab)
-                else "<BLANK>"
-            )
-
-            print(
-                "frame:",
-                t,
-                "token:",
-                token_id,
-                "token_text:",
-                repr(token_text),
-                "max:",
-                float(np.max(logits))
-            )
-
-
-        # ----------------------------------------------------
-        # BLANK
-        # ----------------------------------------------------
-
-        if token_id == BLANK_ID:
-
-            blank_count += 1
-
-            break
-
-
-        # ----------------------------------------------------
-        # INVALID
-        # ----------------------------------------------------
-
-        if token_id >= len(vocab):
-
-            print(
-                "INVALID TOKEN:",
-                token_id
-            )
-
-            break
-
-
-        # ----------------------------------------------------
-        # NORMAL TOKEN
-        # ----------------------------------------------------
-
-        tokens.append(
-            token_id
-        )
-
-        nonblank_count += 1
-
-
-        # ----------------------------------------------------
-        # UPDATE DECODER
-        # ----------------------------------------------------
-
-        decoder_output, h, c = decoder_run(
-            token_id,
-            h,
-            c
-        )
-
-
-        symbols_this_frame += 1
-
-
-        # ----------------------------------------------------
-        # PROTECTION
-        # ----------------------------------------------------
-
-        if symbols_this_frame >= MAX_SYMBOLS_PER_STEP:
-
-            print(
-                "WARNING: MAX_SYMBOLS_PER_STEP "
-                "reached at frame",
-                t
-            )
-
-            break
-
-
-# ============================================================
-# TOKENS
-# ============================================================
-
-print()
-print("=" * 70)
-print("TOKENS")
-print("=" * 70)
-
-print(
-    "Total tokens:",
-    len(tokens)
-)
-
-print(
-    "Blank count:",
-    blank_count
-)
-
-print(
-    "Non-blank count:",
-    nonblank_count
-)
-
-print()
-print(tokens)
-
-
-# ============================================================
-# TOKEN -> TEXT
-# ============================================================
-
-result = ""
-
-for token_id in tokens:
-
-    if 0 <= token_id < len(vocab):
-
-        result += vocab[token_id]
-
-
-# ============================================================
-# CLEAN TEXT
-# ============================================================
-
-result = result.strip()
-
-
-# Убираем повторные пробелы
-
-result = " ".join(
-    result.split()
-)
-
-
-# ============================================================
-# RESULT
-# ============================================================
-
-print()
-print("=" * 70)
-print("RESULT")
-print("=" * 70)
-
-print()
-print("RIGHT CHANNEL:")
-print()
-
-print(result)
-
-print()
-print("=" * 70)
-print("DONE")
-print("=" * 70)
+======================================================================
+ЗАГРУЗКА VOCAB
+======================================================================
+Количество строк в vocab: 34
+ 0: '▁ 0'
+ 1: 'а 1'
+ 2: 'б 2'
+ 3: 'в 3'
+ 4: 'г 4'
+ 5: 'д 5'
+ 6: 'е 6'
+ 7: 'ж 7'
+ 8: 'з 8'
+ 9: 'и 9'
+10: 'й 10'
+11: 'к 11'
+12: 'л 12'
+13: 'м 13'
+14: 'н 14'
+15: 'о 15'
+16: 'п 16'
+17: 'р 17'
+18: 'с 18'
+19: 'т 19'
+20: 'у 20'
+21: 'ф 21'
+22: 'х 22'
+23: 'ц 23'
+24: 'ч 24'
+25: 'ш 25'
+26: 'щ 26'
+27: 'ъ 27'
+28: 'ы 28'
+29: 'ь 29'
+30: 'э 30'
+31: 'ю 31'
+32: 'я 32'
+33: '<blk> 33'
+
+ВНИМАНИЕ: ожидалось 33 токена vocabulary, получено 34
+
+RNNT NUM_CLASSES: 34
+BLANK_ID: 33
+
+======================================================================
+ЗАГРУЗКА ONNX
+======================================================================
+
+----------------------------------------------------------------------
+ENCODER
+----------------------------------------------------------------------
+INPUTS:
+  audio_signal | ['batch_size', 64, 'seq_len'] | tensor(float)
+  length | ['batch_size'] | tensor(int64)
+OUTPUTS:
+  encoded | ['batch_size', 768, 'Transposeencoded_dim_2'] | tensor(float)
+  encoded_len | ['batch_size'] | tensor(int32)
+
+----------------------------------------------------------------------
+DECODER
+----------------------------------------------------------------------
+INPUTS:
+  x | [1, 1] | tensor(int64)
+  h.1 | [1, 1, 320] | tensor(float)
+  c.1 | [1, 1, 320] | tensor(float)
+OUTPUTS:
+  dec | [1, 1, 320] | tensor(float)
+  h | [1, 1, 320] | tensor(float)
+  c | [1, 1, 320] | tensor(float)
+
+----------------------------------------------------------------------
+JOINT
+----------------------------------------------------------------------
+INPUTS:
+  enc | [1, 768, 1] | tensor(float)
+  dec | [1, 320, 1] | tensor(float)
+OUTPUTS:
+  joint | [1, 1, 1, 34] | tensor(float)
+
+======================================================================
+ЗАГРУЗКА WAV
+======================================================================
+Sample rate: 8000
+Shape: (218640, 2)
+Channels: 2
+
+Выбран ПРАВЫЙ канал
+Duration: 27.33 sec
+
+Ресемплинг 8000 -> 16000
+После resample: 437280 samples
+Duration: 27.33 sec
+
+======================================================================
+FEATURE EXTRACTION
+======================================================================
+sample_rate : 16000
+n_fft       : 320
+win_length  : 320
+hop_length  : 160
+n_mels      : 64
+mel_scale   : htk
+mel_norm    : None
+center      : False
+
+Mel shape: (64, 2732)
+
+Encoder input:
+shape : (1, 64, 2732)
+dtype : float32
+length: [2732]
+
+======================================================================
+ENCODER
+======================================================================
+encoded shape: (1, 768, 683)
+encoded_len: [683]
+
+======================================================================
+INITIAL DECODER STATE
+======================================================================
+
+======================================================================
+RNNT GREEDY DECODING
+======================================================================
+Encoder frames: 683
+frame: 0 token: 33 token_text: '<blk> 33' max: -0.00010609064338495955
+frame: 1 token: 33 token_text: '<blk> 33' max: -7.223821739898995e-05
+frame: 2 token: 33 token_text: '<blk> 33' max: -0.00013791563105769455
+frame: 3 token: 33 token_text: '<blk> 33' max: -0.00026663561584427953
+frame: 4 token: 33 token_text: '<blk> 33' max: -0.00021514961554203182
+frame: 5 token: 33 token_text: '<blk> 33' max: -0.000285227142740041
+frame: 6 token: 33 token_text: '<blk> 33' max: -0.00037353215157054365
+frame: 7 token: 33 token_text: '<blk> 33' max: -0.0003494605771265924
+frame: 8 token: 33 token_text: '<blk> 33' max: -0.00022587609419133514
+frame: 9 token: 33 token_text: '<blk> 33' max: -7.60526381782256e-05
+frame: 10 token: 33 token_text: '<blk> 33' max: -3.981510963058099e-05
+frame: 11 token: 33 token_text: '<blk> 33' max: -7.426462980220094e-05
+frame: 12 token: 33 token_text: '<blk> 33' max: -0.0001902399235405028
+frame: 13 token: 33 token_text: '<blk> 33' max: -0.0005150898941792548
+frame: 14 token: 33 token_text: '<blk> 33' max: -0.0039803339168429375
+frame: 15 token: 33 token_text: '<blk> 33' max: -0.017460795119404793
+frame: 16 token: 33 token_text: '<blk> 33' max: -0.033189333975315094
+frame: 17 token: 33 token_text: '<blk> 33' max: -0.02493051439523697
+frame: 18 token: 33 token_text: '<blk> 33' max: -0.09926801919937134
+frame: 19 token: 33 token_text: '<blk> 33' max: -0.6712689399719238
+
+======================================================================
+TOKENS
+======================================================================
+Total tokens: 10
+Blank count: 683
+Non-blank count: 10
+
+[5, 1, 0, 14, 6, 19, 0, 14, 6, 19]
+
+======================================================================
+RESULT
+======================================================================
+
+RIGHT CHANNEL:
+
+д 5а 1▁ 0н 14е 6т 19▁ 0н 14е 6т 19
+
+======================================================================
+DONE
+======================================================================
