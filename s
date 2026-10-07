@@ -32,7 +32,7 @@ VOCAB_FILE = os.path.join(
     "v3_vocab.txt"
 )
 
-SAMPLE_RATE = 16000
+TARGET_SAMPLE_RATE = 16000
 
 N_MELS = 64
 N_FFT = 400
@@ -40,7 +40,6 @@ WIN_LENGTH = 400
 HOP_LENGTH = 160
 
 BLANK_ID = 0
-
 MAX_SYMBOLS_PER_STEP = 20
 
 
@@ -49,11 +48,9 @@ MAX_SYMBOLS_PER_STEP = 20
 # ============================================================
 
 def load_vocab(path):
-
     vocab = []
 
     with open(path, "r", encoding="utf-8") as f:
-
         for line in f:
             vocab.append(line.rstrip("\r\n"))
 
@@ -64,66 +61,91 @@ def load_vocab(path):
 # WAV
 # ============================================================
 
-def load_audio(path):
+def load_right_channel(path):
+    """
+    Читаем стерео WAV.
+    Используем только правый канал.
+    При необходимости ресэмплируем в 16 kHz.
+    """
 
-    audio, sr = sf.read(
+    audio, sample_rate = sf.read(
         path,
         dtype="float32"
     )
 
     print("\nWAV:")
-    print("  sample rate:", sr)
+    print("  sample rate:", sample_rate)
     print("  shape:", audio.shape)
-
-    if sr != SAMPLE_RATE:
-
-        raise ValueError(
-            "Ожидается WAV {} Hz, получено {} Hz".format(
-                SAMPLE_RATE,
-                sr
-            )
-        )
 
     # --------------------------------------------------------
     # Проверяем стерео
     # --------------------------------------------------------
 
     if audio.ndim != 2:
-
         raise ValueError(
-            "Ожидается двухканальный WAV. "
+            "Ожидается стерео WAV. "
             "Получена форма: {}".format(
                 audio.shape
             )
         )
 
     if audio.shape[1] != 2:
-
         raise ValueError(
             "Ожидается 2 канала. "
-            "Получено: {}".format(
+            "Получено каналов: {}".format(
                 audio.shape[1]
             )
         )
 
     # --------------------------------------------------------
-    # Разделяем каналы
+    # Только правый канал
     # --------------------------------------------------------
 
-    left_channel = audio[:, 0]
     right_channel = audio[:, 1]
 
-    print("  channels: 2")
-    print("  left channel:  operator")
-    print("  right channel: client")
+    print("  используем: RIGHT channel")
+
+    # --------------------------------------------------------
+    # Ресэмплинг
+    # --------------------------------------------------------
+
+    if sample_rate != TARGET_SAMPLE_RATE:
+
+        print(
+            "  resample: {} Hz -> {} Hz".format(
+                sample_rate,
+                TARGET_SAMPLE_RATE
+            )
+        )
+
+        right_channel = librosa.resample(
+            right_channel,
+            orig_sr=sample_rate,
+            target_sr=TARGET_SAMPLE_RATE
+        )
+
+    else:
+        print(
+            "  resample: не требуется"
+        )
+
+    right_channel = np.asarray(
+        right_channel,
+        dtype=np.float32
+    )
+
+    print(
+        "  samples:",
+        len(right_channel)
+    )
 
     print(
         "  duration: {:.2f} sec".format(
-            len(right_channel) / SAMPLE_RATE
+            len(right_channel) / TARGET_SAMPLE_RATE
         )
     )
 
-    return left_channel, right_channel
+    return right_channel
 
 
 # ============================================================
@@ -134,7 +156,7 @@ def extract_features(audio):
 
     mel = librosa.feature.melspectrogram(
         y=audio,
-        sr=SAMPLE_RATE,
+        sr=TARGET_SAMPLE_RATE,
         n_fft=N_FFT,
         hop_length=HOP_LENGTH,
         win_length=WIN_LENGTH,
@@ -143,7 +165,7 @@ def extract_features(audio):
         center=True,
         window="hann",
         fmin=0,
-        fmax=SAMPLE_RATE // 2,
+        fmax=TARGET_SAMPLE_RATE // 2,
     )
 
     mel = np.log(
@@ -168,7 +190,7 @@ def extract_features(audio):
 
 
 # ============================================================
-# ONNX
+# ONNX MODELS
 # ============================================================
 
 def load_models():
@@ -276,11 +298,7 @@ def decoder_step(
     new_h = outputs[1]
     new_c = outputs[2]
 
-    return (
-        dec,
-        new_h,
-        new_c
-    )
+    return dec, new_h, new_c
 
 
 # ============================================================
@@ -323,9 +341,7 @@ def run_joint(
         }
     )[0]
 
-    output = output.reshape(-1)
-
-    return output
+    return output.reshape(-1)
 
 
 # ============================================================
@@ -336,8 +352,7 @@ def greedy_decode(
     encoder_output,
     encoder_length,
     decoder,
-    joint,
-    blank_id=0
+    joint
 ):
 
     encoded = encoder_output[0]
@@ -346,7 +361,9 @@ def greedy_decode(
         encoder_length
     )
 
-    # Initial LSTM state
+    # --------------------------------------------------------
+    # Initial decoder state
+    # --------------------------------------------------------
 
     h = np.zeros(
         (1, 1, 320),
@@ -358,11 +375,10 @@ def greedy_decode(
         dtype=np.float32
     )
 
-    # Первый decoder state
-
+    # Первый decoder input
     dec, h, c = decoder_step(
         decoder,
-        blank_id,
+        BLANK_ID,
         h,
         c
     )
@@ -370,6 +386,10 @@ def greedy_decode(
     tokens = []
 
     t = 0
+
+    # --------------------------------------------------------
+    # RNNT greedy decoding
+    # --------------------------------------------------------
 
     while t < T:
 
@@ -389,32 +409,38 @@ def greedy_decode(
                 np.argmax(logits)
             )
 
+            # ------------------------------------------------
             # Blank
+            # ------------------------------------------------
 
-            if token == blank_id:
+            if token == BLANK_ID:
 
                 t += 1
-
                 break
+
+            # ------------------------------------------------
+            # Token
+            # ------------------------------------------------
 
             emitted += 1
 
             if emitted > MAX_SYMBOLS_PER_STEP:
 
                 print(
-                    "WARNING: слишком много "
-                    "токенов на timestep"
+                    "WARNING: слишком много токенов "
+                    "на одном timestep"
                 )
 
                 t += 1
-
                 break
 
             tokens.append(
                 token
             )
 
-            # Обновляем decoder
+            # ------------------------------------------------
+            # Decoder
+            # ------------------------------------------------
 
             dec, h, c = decoder_step(
                 decoder,
@@ -439,27 +465,25 @@ def tokens_to_text(
 
     for token_id in tokens:
 
+        if token_id == BLANK_ID:
+            continue
+
         if token_id < 0:
             continue
 
         if token_id >= len(vocab):
 
             print(
-                "WARNING: token {} "
-                "отсутствует в vocab".format(
+                "WARNING: token {} отсутствует "
+                "в vocab".format(
                     token_id
                 )
             )
 
             continue
 
-        if token_id == BLANK_ID:
-            continue
-
-        token = vocab[token_id]
-
         result.append(
-            token
+            vocab[token_id]
         )
 
     return "".join(result)
@@ -473,22 +497,22 @@ def main():
 
     print("=" * 70)
     print("GigaAM v3 RNNT")
-    print("Python 3.8 / CPU")
+    print("Python 3.8 / CPU / INT8")
     print("=" * 70)
 
     # --------------------------------------------------------
-    # Проверка файлов
+    # Проверяем файлы
     # --------------------------------------------------------
 
-    files = [
+    required_files = [
         ENCODER_FILE,
         DECODER_FILE,
         JOINT_FILE,
         VOCAB_FILE,
-        WAV_FILE,
+        WAV_FILE
     ]
 
-    for path in files:
+    for path in required_files:
 
         if not os.path.exists(path):
 
@@ -506,28 +530,19 @@ def main():
         VOCAB_FILE
     )
 
-    print("\nVocabulary:")
     print(
-        "  tokens:",
-        len(vocab)
+        "\nVocabulary:",
+        len(vocab),
+        "tokens"
     )
 
     # --------------------------------------------------------
     # WAV
     # --------------------------------------------------------
 
-    left_channel, right_channel = load_audio(
+    audio = load_right_channel(
         WAV_FILE
     )
-
-    # --------------------------------------------------------
-    # Пока используем ТОЛЬКО ПРАВЫЙ канал
-    # --------------------------------------------------------
-
-    print("\nTranscription:")
-    print("  selected channel: RIGHT / client")
-
-    audio = right_channel
 
     # --------------------------------------------------------
     # Features
@@ -556,17 +571,9 @@ def main():
 
     encoder, decoder, joint = load_models()
 
-    print(
-        "  encoder loaded"
-    )
-
-    print(
-        "  decoder loaded"
-    )
-
-    print(
-        "  joint loaded"
-    )
+    print("  encoder loaded")
+    print("  decoder loaded")
+    print("  joint loaded")
 
     # --------------------------------------------------------
     # Encoder
@@ -589,12 +596,11 @@ def main():
         encoded,
         encoded_len[0],
         decoder,
-        joint,
-        blank_id=BLANK_ID
+        joint
     )
 
     print(
-        "\nToken count:",
+        "  token count:",
         len(tokens)
     )
 
@@ -609,7 +615,7 @@ def main():
 
     print("\n")
     print("=" * 70)
-    print("RIGHT CHANNEL / CLIENT:")
+    print("RIGHT CHANNEL:")
     print("=" * 70)
     print(text)
     print("=" * 70)
