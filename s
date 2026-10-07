@@ -1,32 +1,33 @@
-import onnxruntime as ort
+======================================================================
+v3_rnnt_encoder.int8.onnx
 
-path = r"C:\Users\tolog\Desktop\gig"
+INPUTS:
+name = audio_signal | shape = ['batch_size', 64, 'seq_len'] | type = tensor(float)
+name = length | shape = ['batch_size'] | type = tensor(int64)
 
-for name in [
-    "v3_rnnt_encoder.int8.onnx",
-    "v3_rnnt_decoder.int8.onnx",
-    "v3_rnnt_joint.int8.onnx",
-]:
-    print("\n" + "=" * 70)
-    print(name)
+OUTPUTS:
+name = encoded | shape = ['batch_size', 768, 'Transposeencoded_dim_2'] | type = tensor(float)
+name = encoded_len | shape = ['batch_size'] | type = tensor(int32)
 
-    model = ort.InferenceSession(
-        path + "\\" + name,
-        providers=["CPUExecutionProvider"]
-    )
+======================================================================
+v3_rnnt_decoder.int8.onnx
 
-    print("\nINPUTS:")
-    for x in model.get_inputs():
-        print(
-            "name =", x.name,
-            "| shape =", x.shape,
-            "| type =", x.type
-        )
+INPUTS:
+name = x | shape = [1, 1] | type = tensor(int64)
+name = h.1 | shape = [1, 1, 320] | type = tensor(float)
+name = c.1 | shape = [1, 1, 320] | type = tensor(float)
 
-    print("\nOUTPUTS:")
-    for x in model.get_outputs():
-        print(
-            "name =", x.name,
-            "| shape =", x.shape,
-            "| type =", x.type
-        )
+OUTPUTS:
+name = dec | shape = [1, 1, 320] | type = tensor(float)
+name = h | shape = [1, 1, 320] | type = tensor(float)
+name = c | shape = [1, 1, 320] | type = tensor(float)
+
+======================================================================
+v3_rnnt_joint.int8.onnx
+
+INPUTS:
+name = enc | shape = [1, 768, 1] | type = tensor(float)
+name = dec | shape = [1, 320, 1] | type = tensor(float)
+
+OUTPUTS:
+name = joint | shape = [1, 1, 1, 34] | type = tensor(float)
