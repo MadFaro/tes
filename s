@@ -1,5 +1,6 @@
 import os
 import re
+import csv
 
 import numpy as np
 import soundfile as sf
@@ -12,7 +13,17 @@ import onnxruntime as ort
 # ============================================================
 
 MODEL_DIR = r"C:\Users\tolog\Desktop\gig"
-WAV_FILE = r"C:\Users\tolog\Desktop\test.wav"
+
+# Папка с WAV-файлами
+INPUT_DIR = r"C:\Users\tolog\Desktop\audio"
+
+# Куда сохранить результат
+OUTPUT_CSV = r"C:\Users\tolog\Desktop\transcriptions.csv"
+
+
+# ============================================================
+# MODEL FILES
+# ============================================================
 
 ENCODER_FILE = os.path.join(
     MODEL_DIR,
@@ -36,34 +47,27 @@ VOCAB_FILE = os.path.join(
 
 
 # ============================================================
-# AUDIO
+# AUDIO SETTINGS
 # ============================================================
 
 TARGET_SR = 16000
 
-# Минимальная длительность тишины,
-# после которой считаем, что реплика закончилась.
+# Минимальная продолжительность тишины,
+# которая считается границей реплики.
 MIN_SILENCE_DURATION = 0.45
 
-# Максимальная длина одного фрагмента.
+# Максимальная длина одного куска.
 MAX_SEGMENT_DURATION = 25.0
 
-# Если после разрезания по 25 секунд остаётся
-# очень короткий кусок, можно не создавать его отдельно.
+# Слишком короткие куски игнорируем.
 MIN_SEGMENT_DURATION = 0.30
 
-
-# ============================================================
-# SILENCE / VAD
-# ============================================================
-
-# Порог относительно максимальной энергии канала.
-# Например -38 dB.
+# Порог тишины.
 SILENCE_DB = -38
 
 
 # ============================================================
-# GIGAAM
+# GIGAAM SETTINGS
 # ============================================================
 
 N_MELS = 64
@@ -85,12 +89,13 @@ MAX_SYMBOLS_PER_STEP = 20
 
 def format_time(seconds):
 
-    seconds = max(0, seconds)
-
-    hours = int(seconds // 3600)
+    seconds = max(
+        0,
+        seconds
+    )
 
     minutes = int(
-        (seconds % 3600) // 60
+        seconds // 60
     )
 
     secs = int(
@@ -98,17 +103,9 @@ def format_time(seconds):
     )
 
     millis = int(
-        (seconds - int(seconds)) * 1000
+        (seconds - int(seconds))
+        * 1000
     )
-
-    if hours > 0:
-
-        return (
-            f"{hours:02d}:"
-            f"{minutes:02d}:"
-            f"{secs:02d}."
-            f"{millis:03d}"
-        )
 
     return (
         f"{minutes:02d}:"
@@ -131,7 +128,9 @@ with open(
 
     for line in f:
 
-        line = line.rstrip("\r\n")
+        line = line.rstrip(
+            "\r\n"
+        )
 
         # Формат:
         #
@@ -159,27 +158,38 @@ with open(
 
 
 # ============================================================
-# ONNX
+# LOAD ONNX
 # ============================================================
+
+print("Загрузка модели...")
 
 encoder = ort.InferenceSession(
     ENCODER_FILE,
-    providers=["CPUExecutionProvider"]
+    providers=[
+        "CPUExecutionProvider"
+    ]
 )
 
 decoder = ort.InferenceSession(
     DECODER_FILE,
-    providers=["CPUExecutionProvider"]
+    providers=[
+        "CPUExecutionProvider"
+    ]
 )
 
 joint = ort.InferenceSession(
     JOINT_FILE,
-    providers=["CPUExecutionProvider"]
+    providers=[
+        "CPUExecutionProvider"
+    ]
 )
+
+print("Модель загружена.")
+print()
 
 
 # ============================================================
-# GIGAAM FUNCTIONS
+# DECODER
 # ============================================================
 
 def decoder_run(
@@ -208,6 +218,10 @@ def decoder_run(
         new_c
     )
 
+
+# ============================================================
+# JOINT
+# ============================================================
 
 def joint_run(
     enc_vector,
@@ -238,7 +252,7 @@ def joint_run(
 
 
 # ============================================================
-# TRANSCRIBE ONE SEGMENT
+# TRANSCRIBE ONE AUDIO SEGMENT
 # ============================================================
 
 def transcribe_audio(
@@ -309,7 +323,9 @@ def transcribe_audio(
             mel,
             1e-10
         )
-    ).astype(np.float32)
+    ).astype(
+        np.float32
+    )
 
 
     # --------------------------------------------------------
@@ -350,7 +366,7 @@ def transcribe_audio(
 
 
     # --------------------------------------------------------
-    # DECODER INITIAL STATE
+    # INITIAL DECODER STATE
     # --------------------------------------------------------
 
     h = np.zeros(
@@ -397,7 +413,10 @@ def transcribe_audio(
         symbols = 0
 
 
-        while symbols < MAX_SYMBOLS_PER_STEP:
+        while (
+            symbols
+            < MAX_SYMBOLS_PER_STEP
+        ):
 
             logits = joint_run(
                 enc_vector,
@@ -430,7 +449,6 @@ def transcribe_audio(
             )
 
 
-            # Новый символ
             decoder_output, h, c = decoder_run(
                 token_id,
                 h,
@@ -451,14 +469,14 @@ def transcribe_audio(
     )
 
 
-    # ▁ = пробел
+    # SentencePiece-style word marker
     text = text.replace(
         "▁",
         " "
     )
 
 
-    # Убираем повторные пробелы
+    # Убираем лишние пробелы
     text = re.sub(
         r"\s+",
         " ",
@@ -470,17 +488,13 @@ def transcribe_audio(
 
 
 # ============================================================
-# FIND SPEECH SEGMENTS
+# SPLIT CHANNEL BY SILENCE
 # ============================================================
 
 def split_channel(
     audio,
     sr
 ):
-
-    # --------------------------------------------------------
-    # RMS
-    # --------------------------------------------------------
 
     frame_length = int(
         0.030 * sr
@@ -490,6 +504,10 @@ def split_channel(
         0.010 * sr
     )
 
+
+    # --------------------------------------------------------
+    # RMS
+    # --------------------------------------------------------
 
     rms = librosa.feature.rms(
         y=audio,
@@ -509,11 +527,13 @@ def split_channel(
     )
 
 
-    speech = db > SILENCE_DB
+    speech = (
+        db > SILENCE_DB
+    )
 
 
     # --------------------------------------------------------
-    # FIND CONTINUOUS SPEECH
+    # FIND SPEECH
     # --------------------------------------------------------
 
     segments = []
@@ -523,12 +543,14 @@ def split_channel(
     silence_frames = 0
 
     max_silence_frames = int(
-        MIN_SILENCE_DURATION /
-        0.010
+        MIN_SILENCE_DURATION
+        / 0.010
     )
 
 
-    for i, is_speech in enumerate(speech):
+    for i, is_speech in enumerate(
+        speech
+    ):
 
         if is_speech:
 
@@ -551,28 +573,28 @@ def split_channel(
                 ):
 
                     end_frame = (
-                        i -
-                        silence_frames +
-                        1
+                        i
+                        - silence_frames
+                        + 1
                     )
 
 
                     start_time = (
-                        start_frame *
-                        hop_length /
-                        sr
+                        start_frame
+                        * hop_length
+                        / sr
                     )
 
                     end_time = (
-                        end_frame *
-                        hop_length /
-                        sr
+                        end_frame
+                        * hop_length
+                        / sr
                     )
 
 
                     if (
-                        end_time -
-                        start_time
+                        end_time
+                        - start_time
                         >= MIN_SEGMENT_DURATION
                     ):
 
@@ -585,6 +607,7 @@ def split_channel(
 
 
                     start_frame = None
+
                     silence_frames = 0
 
 
@@ -595,17 +618,20 @@ def split_channel(
     if start_frame is not None:
 
         start_time = (
-            start_frame *
-            hop_length /
-            sr
+            start_frame
+            * hop_length
+            / sr
         )
 
-        end_time = len(audio) / sr
+        end_time = (
+            len(audio)
+            / sr
+        )
 
 
         if (
-            end_time -
-            start_time
+            end_time
+            - start_time
             >= MIN_SEGMENT_DURATION
         ):
 
@@ -618,7 +644,7 @@ def split_channel(
 
 
     # ========================================================
-    # SPLIT > 25 SEC
+    # MAX 25 SECONDS
     # ========================================================
 
     final_segments = []
@@ -626,7 +652,9 @@ def split_channel(
 
     for start, end in segments:
 
-        duration = end - start
+        duration = (
+            end - start
+        )
 
 
         if duration <= MAX_SEGMENT_DURATION:
@@ -645,25 +673,25 @@ def split_channel(
 
 
         while (
-            end -
-            current
+            end - current
             > MAX_SEGMENT_DURATION
         ):
 
             final_segments.append(
                 (
                     current,
-                    current +
-                    MAX_SEGMENT_DURATION
+                    current
+                    + MAX_SEGMENT_DURATION
                 )
             )
 
-            current += MAX_SEGMENT_DURATION
+            current += (
+                MAX_SEGMENT_DURATION
+            )
 
 
         if (
-            end -
-            current
+            end - current
             >= MIN_SEGMENT_DURATION
         ):
 
@@ -697,10 +725,7 @@ def process_channel(
     result = []
 
 
-    for index, (
-        start,
-        end
-    ) in enumerate(segments):
+    for start, end in segments:
 
         start_sample = int(
             start * sr
@@ -741,169 +766,284 @@ def process_channel(
 
 
 # ============================================================
-# LOAD ORIGINAL WAV
+# BUILD DIALOGUE
 # ============================================================
 
-audio, sr = sf.read(
-    WAV_FILE,
-    dtype="float32",
-    always_2d=True
-)
+def process_file(
+    wav_file
+):
 
+    # --------------------------------------------------------
+    # READ WAV
+    # --------------------------------------------------------
 
-if audio.shape[1] < 2:
-
-    raise RuntimeError(
-        "WAV должен быть стерео."
+    audio, sr = sf.read(
+        wav_file,
+        dtype="float32",
+        always_2d=True
     )
 
 
-# ============================================================
-# CHANNELS
-# ============================================================
+    if audio.shape[1] < 2:
 
-operator_channel = audio[:, 0]
-
-client_channel = audio[:, 1]
-
-
-# ============================================================
-# PROCESS OPERATOR
-# ============================================================
-
-operator_segments = process_channel(
-    operator_channel,
-    sr,
-    "Оператор"
-)
-
-
-# ============================================================
-# PROCESS CLIENT
-# ============================================================
-
-client_segments = process_channel(
-    client_channel,
-    sr,
-    "Клиент"
-)
-
-
-# ============================================================
-# MERGE
-# ============================================================
-
-dialogue = (
-    operator_segments +
-    client_segments
-)
-
-
-# По времени
-dialogue.sort(
-    key=lambda x: x["start"]
-)
-
-
-# ============================================================
-# MERGE CONSECUTIVE SAME SPEAKER
-# ============================================================
-
-merged = []
-
-
-for item in dialogue:
-
-    if not merged:
-
-        merged.append(
-            item.copy()
+        raise RuntimeError(
+            "WAV не является стерео"
         )
 
-        continue
+
+    # --------------------------------------------------------
+    # CHANNELS
+    # --------------------------------------------------------
+
+    operator_channel = audio[
+        :,
+        0
+    ]
+
+    client_channel = audio[
+        :,
+        1
+    ]
 
 
-    previous = merged[-1]
+    # --------------------------------------------------------
+    # OPERATOR
+    # --------------------------------------------------------
+
+    operator_segments = process_channel(
+        operator_channel,
+        sr,
+        "Оператор"
+    )
 
 
-    # Если следующий фрагмент принадлежит
-    # тому же человеку — объединяем.
-    #
-    # Даже если между ними была небольшая
-    # тишина.
+    # --------------------------------------------------------
+    # CLIENT
+    # --------------------------------------------------------
 
-    if (
-        previous["speaker"]
-        == item["speaker"]
-    ):
+    client_segments = process_channel(
+        client_channel,
+        sr,
+        "Клиент"
+    )
 
-        previous["end"] = max(
-            previous["end"],
+
+    # --------------------------------------------------------
+    # MERGE
+    # --------------------------------------------------------
+
+    dialogue = (
+        operator_segments
+        + client_segments
+    )
+
+
+    dialogue.sort(
+        key=lambda x: x["start"]
+    )
+
+
+    # --------------------------------------------------------
+    # MERGE SAME SPEAKER
+    # --------------------------------------------------------
+
+    merged = []
+
+
+    for item in dialogue:
+
+        if not merged:
+
+            merged.append(
+                item.copy()
+            )
+
+            continue
+
+
+        previous = merged[-1]
+
+
+        if (
+            previous["speaker"]
+            == item["speaker"]
+        ):
+
+            previous["end"] = max(
+                previous["end"],
+                item["end"]
+            )
+
+
+            previous["text"] = (
+                previous["text"].rstrip()
+                + " "
+                + item["text"].lstrip()
+            )
+
+        else:
+
+            merged.append(
+                item.copy()
+            )
+
+
+    # --------------------------------------------------------
+    # FORMAT DIALOGUE
+    # --------------------------------------------------------
+
+    dialogue_lines = []
+
+
+    for item in merged:
+
+        start = format_time(
+            item["start"]
+        )
+
+        end = format_time(
             item["end"]
         )
 
-        previous["text"] = (
-            previous["text"].rstrip()
-            + " "
-            + item["text"].lstrip()
+        dialogue_lines.append(
+            f"[{start} - {end}] "
+            f"{item['speaker']}: "
+            f"{item['text']}"
         )
 
-    else:
 
-        merged.append(
-            item.copy()
+    return "\n".join(
+        dialogue_lines
+    )
+
+
+# ============================================================
+# FIND WAV FILES
+# ============================================================
+
+wav_files = [
+    os.path.join(
+        INPUT_DIR,
+        filename
+    )
+    for filename in os.listdir(
+        INPUT_DIR
+    )
+    if filename.lower().endswith(
+        ".wav"
+    )
+]
+
+
+wav_files.sort()
+
+
+if not wav_files:
+
+    raise RuntimeError(
+        "В указанной папке нет WAV-файлов."
+    )
+
+
+print(
+    f"Найдено файлов: {len(wav_files)}"
+)
+
+print()
+
+
+# ============================================================
+# PROCESS ALL FILES
+# ============================================================
+
+rows = []
+
+
+for index, wav_file in enumerate(
+    wav_files,
+    start=1
+):
+
+    filename = os.path.basename(
+        wav_file
+    )
+
+
+    print(
+        f"[{index}/{len(wav_files)}] "
+        f"{filename}"
+    )
+
+
+    try:
+
+        dialogue = process_file(
+            wav_file
+        )
+
+
+        rows.append(
+            {
+                "filename": filename,
+                "dialogue": dialogue
+            }
+        )
+
+
+        print(
+            "    готово"
+        )
+
+
+    except Exception as e:
+
+        print(
+            f"    ОШИБКА: {e}"
+        )
+
+
+        rows.append(
+            {
+                "filename": filename,
+                "dialogue": ""
+            }
         )
 
 
 # ============================================================
-# FINAL OUTPUT
+# SAVE CSV
+# ============================================================
+
+with open(
+    OUTPUT_CSV,
+    "w",
+    newline="",
+    encoding="utf-8-sig"
+) as f:
+
+    writer = csv.DictWriter(
+        f,
+        fieldnames=[
+            "filename",
+            "dialogue"
+        ],
+        delimiter=";"
+    )
+
+
+    writer.writeheader()
+
+
+    writer.writerows(
+        rows
+    )
+
+
+# ============================================================
+# DONE
 # ============================================================
 
 print()
-
 print(
-    "╔" + "═" * 78 + "╗"
-)
-
-print(
-    "║"
-    + " ДИАЛОГ ".center(78)
-    + "║"
-)
-
-print(
-    "╚" + "═" * 78 + "╝"
-)
-
-print()
-
-
-for item in merged:
-
-    start = format_time(
-        item["start"]
-    )
-
-    end = format_time(
-        item["end"]
-    )
-
-    speaker = item["speaker"]
-
-    text = item["text"]
-
-
-    print(
-        f"[{start} - {end}] {speaker}:"
-    )
-
-    print(
-        text
-    )
-
-    print()
-
-
-print(
-    "Готово."
+    f"Готово. Результат: {OUTPUT_CSV}"
 )
