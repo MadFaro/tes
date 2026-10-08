@@ -1,33 +1,6 @@
-import os
-import csv
-from pydub import AudioSegment
+Номер претензии	Статус	Сервис	Процесс	Инициатор	Год	Месяц	Начало плановое	Тип обращения	Оператор (ФИО)	Группа	Клиент ФЛ	Продукт	Описание претензии	Комментарий	Заключение	Окончание фактическое	Ответственный
+K-260928-003306	Готово	ДДО	Входящий звонок	УКОиРС	2026	Сентябрь	30.09.2026 22:12	Претензия	Халикова Гульнара Энгелевна	ДДО №8	БОГАТОВА ДАРЬЯ СЕРГЕЕВНА	Досрочное погашение	Добрый день! Клиент в личном кабинете уралсиба клиент увидел сумму к ПДП на 28.09.26 года (заявку подавала 26.09.26 года в личном кабинете) на 66203 руб. Звонила клиент в КЦ 26.09.2026 года. Сотрудник КЦ сказал, что действительно для ПДП на дату 28.09.26 года нужно внести 66203 руб. Со слов клиента она делала несколько заявок на ПДП 26.09.26 года (на 66203 руб (этого не видно в супервизор арм дбо4), 65988,59 (было отказано, так как недостаточно средств)  и ПДП на 66417, 63 руб. У клиента 28.09.26 года в полное погашение кредита было списано 66417,63 руб. Почему банк списал больше, а не 66203? Номер договора 9954-P13/47998. Клиент считает, что банк списал излишнюю сумму. Просит вернуть разницу в размере 214,63 руб. на счет 40817810400541061640. Звонок клиента в КЦ 28.09.26 года с номера телефона 9802183383.	Добрый день! Звонок от 26.09.2026 21:05:15, оператор Халикова Гульнара Энгелевна. Клиент задавала вопросы касаемо суммы для ПДП и спросила почему принята заявка на ПДП в ДБО с суммой к погашению 66417,63 руб. Оператор проверила информацию в ЕФС, увидела, что общая сумма задолженности 66203,11 руб. и сообщила, что в понедельник будут списаны 66203,11 руб. в счет ПДП.  Консультация некорректна – оператор не учла, что %% по КД начисляются ежедневно, и сумма к погашению, которую она увидела в ЕФС, станет выше к понедельнику (ПДП производится в рабочие дни). При этом, сумма 66417,63 руб., которую клиент видела в ДБО была корректной, так как уже учитывала начисленные %%. Информация доведена до РГ.  	Обоснованно	01.10.2026 14:45	KHAJRULLINIR
 
-folder = r"C:\Users\TologonovAB\Desktop\audio"
-output_csv = os.path.join(folder, "audio_duration.csv")
 
-rows = []
-
-for filename in os.listdir(folder):
-    if filename.lower().endswith((".wav", ".mp3", ".flac", ".ogg", ".m4a")):
-        filepath = os.path.join(folder, filename)
-
-        try:
-            audio = AudioSegment.from_file(filepath)
-            duration = len(audio) / 1000
-
-            rows.append([
-                filename,
-                round(duration, 2)
-            ])
-
-            print(f"{filename}: {duration:.2f} сек")
-
-        except Exception as e:
-            print(f"Ошибка: {filename} — {e}")
-
-with open(output_csv, "w", newline="", encoding="utf-8-sig") as f:
-    writer = csv.writer(f, delimiter=";")
-    writer.writerow(["Файл", "Длительность, сек"])
-    writer.writerows(rows)
-
-print(f"\nГотово: {output_csv}")
+ROW_ID, CREATED, CREATED_BY, LAST_UPD, LAST_UPD_BY, MODIFICATION_NUM, CONFLICT_ID, PAR_ROW_ID, ANSW_EMAIL_FLG, ANSW_PHONE_FLG, ANSW_POSR_OTHER_ADDR_FLG, ANSW_POST_FACT_ADDR_FLG, LOST_CARD_FLG, NOT_OTHER_HAND_FLG, NOT_RECIEVE_MERCH_FLG, OTHER_DISPUTE_REASON_FLG, REFUSE_TRANS_FLG, CARD_LOST_DATE, CONTACT_PHONE_MANUAL, COUNT_100, COUNT_1000, COUNT_200, COUNT_2000, COUNT_50, COUNT_500, COUNT_5000, DB_LAST_UPD, TRANSACTION_DATE, WORK_PHONE_MANUAL, ACCOUNT_NUM, ACCOUNT_NUM_MANUAL, ANSW_OTHER_ADDR, ATM_ADDR, ATM_BRANCH_NAME, ATM_NUM, ATM_TYPE, CALL_TIME_FROM, CALL_TIME_TO, CARDHOLDER, CARD_LOST_PLACE, CARD_NUM, CARD_NUM_MANUAL, CARD_TYPE, CASHBACK_ACC_NUM, CASHBACK_BRANCH_NAME, CASHBACK_TYPE, CLAIM_CATEGORY, CLAIM_NUM, CONTACT_PHONE, DB_LAST_UPD_SRC, DESCRIPTION, EMAIL, EMAIL_AUTO, EMAIL_MANUAL, FACT_ADDR, FACT_ADDR_AUTO, FACT_ADDR_MANUAL, OPERANION_TYPE, ORGANISATION_NAME, ORG_EMP_POSITION, PAYMENT_DETAILS, PAYMENT_REC_NAME, TRANSACTION_NUM, TRANSACTION_SUM, WORK_PHONE, ACC_CARD_HOLDER, ACC_CARD_NUM_MANUAL, ACC_CARD_TYPE, ACCOUNT_DATE, ACCOUNT_NAME, CASHBACK_ACC_NUM_MANUAL, CLAIM_PREFIX, ORGANIZATION_INN, REQUIREMENT_SUM, EMAIL_SENT_FLG, SMS_SENT_FLG, EMP_ID, FIN_REQ_FLG, ACT_PAYMENTS, AMOUND_DISPUTE, BEF_CALL_TIME, CARD_END_DATE, CARD_NUM_ULTIMATE, CASHBACK_ACC_ULTIMATE, CB_REQUEST_FLG, CITY_CLAIM, CLAIM_DATE, CLAIM_EVALUATION, CLAIM_KEY_DATE, CLAIM_RELATED, CLAIM_TYPE, CLIENT_TYPE, CRASH_RELATED, CUM_BALANC, DECISION_DATE, DEP_NO_ZERO, DPR_COMMENT, EMAIL_INFO, FACT_START_DT, FINAL_OS_CLIENT, FIO_EMPL_POS_FEEDB, FIO_GUILTY_EMP, MACROFILIAL_CLAIM, MAX_CON_DELAY, MCC_OPER, OFFICE_ADRESS, OFFICE_COMPLAINT_NAME, OFFICE_MANAGER, OFFICE_NAME, OTHER_GOV_ORG_FLG, PAY_CURR, PHONE_THO_INFO, PRE_CALL_TIME, PRES_OVER_DEBT, REQ_CURR, RESP_DIR, RESPONSE_DATE, RETREATMENT, SFU_FLG, SR_APPL_TEMPL, SR_CATEGORY, SR_COUNTER, SR_DATE, SR_EMP_ID, SR_NEW_FLG, SR_PRODUCT, SR_PRODUCT_THREE, SR_PRODUCT_TWO, SR_SOURCE, SR_THEME, SR_THEME_THREE, SR_THEME_TWO, SR_YYMMDD, STR_HOUS_BUILD, TOTAL_DEBT, URSIB_BONUS, CARD_LOSS_THEFT, CARD_LOSS_THEFT_DESC, CASHBACK_BRANCH_WEB, NO_TRANS_OTHER, NOT_PART_TRANS, NOT_TRANS_THREE_PERS, PROD_SERV_NOT_REC, PROF_DEV, REQ_DATE, SEND_REQ_DATE, FINAL_OS_EMAIL_FLG, FINAL_OS_GOSORG_FLG, FINAL_OS_MAIL_FLG, FINAL_OS_PHONE_FLG, FINAL_OS_SMS_FLG, FINAL_OS_SOC_MEDIA_FLG, CLAIM_COMM_DATE, CLAIM_COMM_DATE_MANUAL, CLAIM_OPERATOR_FIO, CLAIM_PHONE_NUM, PRODUCT_SV, SUBTYPE_SV, TYPE_SV, USB_CLAIM_COM_TYPE, IR_ID, PR_CLAIM_ID, ACC_BANK_TR_SBP, ACC_INFO_DOC_SBP, ACCOUNT_NUM_SBP, CONTACT_PHONE_SBP, FUND_NOT_REC_SBP, NOT_PAR_OP_SBP, OPER_REPL_SBP, PAYM_METH_NOT_SBP, PROD_RET_NOT_SBP, PROD_SERV_NOT_SBP, MATR_SOL, OPER_MIST_FLG, OTHER_FLG, LOAD_DTTM, WORKFLOW_RUN_ID, HASH_TAG, HASH_TAG2, HASH_TAG3, HASH_TAG4, HASH_TAG5, HASH_TAG6, HASH_TAG7, HASH_TAG8, HASH_TAG9, HASH_TAG10, HASH_TAG11, HASH_TAG12, HASH_TAG13, HASH_TAG14, HASH_TAG15, DML_TYPE_CD, PROCESSED_DTTM
+1-U1OV77Y	28.09.26 17:03:31	1-3OSA1Z2	07.10.26 06:10:00	1-CJRCX64	9	0	1-U1OV77Y	N	Y	N	N	N	N	N	N	N										07.10.26 06:10:00																	40817810400541061640				K-260928-003306	9802183383	User		1-54HHKZ-324	9802183383@bk.ru		2-1FUSHYP	РОССИЯ 125504 г. Москва  г Москва ул ПЯЛОВСКАЯ 10   172																K		214,63	Y	Y	1-3OSA1Z2	Да	214,63		28.09.26 16:00:00			40817810400541061640	N			Justifiably			Претензия	Individual							29.09.26 05:41:35											N	RUB		28.09.26 04:00:00		RUB	ДирПР	07.10.26 11:09:58	No	N	Standartnyj shablon	Ispolnenie dosr pos	003306	28.09.26 00:00:00	1-CJRCX64	Y	POS credit			CC	Sopr dog			260928			0	N				N	N	N				N	N	N	N	Y	N	28.09.26 16:54:00		Низамова Айсылу Рустемовна	9802183383				Phone Call		No Match Row Id	N	N			N	N	N	N	N		Y	N	N	08.10.26 00:27:54	51043888	3BA34AD10F202E355939AAEA24DC2C6F	63DD201742C172E83D1753A646679EA2	D41D8CD98F00B204E9800998ECF8427E	7B781D9E9A9FF31789F5D4154FB8D1BD	BB79871425DD719E238AC03A59C9D532	D45D76590D37C6EEDC20E15404A299F4	D41D8CD98F00B204E9800998ECF8427E	D41D8CD98F00B204E9800998ECF8427E	D41D8CD98F00B204E9800998ECF8427E	169C567C8A8E52EB01AAB0084854FBF5	E891C222C845F17A5754F06F123E4EF0	D41D8CD98F00B204E9800998ECF8427E	D41D8CD98F00B204E9800998ECF8427E	D41D8CD98F00B204E9800998ECF8427E	20E565A8D12F8B3FFCEA4AFABE330435	U	08.10.26 00:41:52
